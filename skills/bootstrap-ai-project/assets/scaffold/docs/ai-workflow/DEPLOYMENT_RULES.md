@@ -1,0 +1,39 @@
+# Deployment Rules
+
+## General
+
+Claude must never deploy without explicit human approval.
+
+Never open giant PRs. Plan each PR as a small, reviewable unit (target ≤ ~400 lines, measured when the slice opens); when changes depend on each other, prefer a chain of stacked PRs.
+
+A deployment with more than a couple of steps gets written up first from `RUNBOOK_TEMPLATE.md`: it assigns each step to the agent or to a human and gates each phase on a verification. The runbook says who runs what; the rules below say what may be deployed at all, and the runbook never overrides them.
+
+## Frontend / Hosting
+
+Before deploying a frontend (Firebase Hosting, Azure Static Web Apps, or other):
+
+- Confirm hosting target and environment.
+- Confirm build configuration and environment variables.
+- Run or define Playwright QA.
+
+## Firebase Backend
+
+Before Firebase deployment:
+
+- Confirm Firebase project ID.
+- Confirm Cloud Functions target.
+- Confirm environment variables/secrets.
+- Confirm Firestore rules and indexes impact.
+- Confirm whether deployment is staging or production.
+- Do not deploy without approval.
+
+## Azure Backend
+
+Before Azure deployment:
+
+- Confirm Azure subscription/resource group.
+- Confirm Functions/App Service target.
+- Confirm environment variables/secrets.
+- Confirm auth model.
+- Confirm whether deployment is staging or production.
+- Do not deploy without approval.

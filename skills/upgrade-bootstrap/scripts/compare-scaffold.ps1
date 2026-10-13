@@ -1,0 +1,58 @@
+# Classifies the project's files against the canonical scaffold (3-hash merge-base).
+# Usage: pwsh -File compare-scaffold.ps1 -ProjectDir <path> -CanonicalScaffold <path to the installed assets\scaffold>
+# Emits JSON to stdout: { hasProjectManifest, canonicalVersion, variant, missing[], outdated[], customized[], orphan[], uptodate[] }
+param(
+    [Parameter(Mandatory)][string]$ProjectDir,
+    [Parameter(Mandatory)][string]$CanonicalScaffold
+)
+$ErrorActionPreference = "Stop"
+
+. (Join-Path $PSScriptRoot "normalized-hash.ps1")
+# Get-Hashes and Test-Sealed (the manifest matching rule, legacy raw bases included) live in
+# normalized-hash.ps1, next to this script.
+
+$canonManifestPath = Join-Path $CanonicalScaffold ".bootstrap-manifest.json"
+if (-not (Test-Path $canonManifestPath)) { throw "Canonical scaffold has no manifest: $canonManifestPath" }
+$canon = Get-Content $canonManifestPath -Raw | ConvertFrom-Json
+
+$projManifestPath = Join-Path $ProjectDir ".bootstrap-manifest.json"
+$hasProjManifest = Test-Path $projManifestPath
+$projBase = @{}
+if ($hasProjManifest) {
+    (Get-Content $projManifestPath -Raw | ConvertFrom-Json).files.PSObject.Properties | ForEach-Object { $projBase[$_.Name] = $_.Value }
+}
+
+$missing = @(); $outdated = @(); $customized = @(); $uptodate = @()
+foreach ($p in $canon.files.PSObject.Properties) {
+    $rel = $p.Name; $canonHash = $p.Value
+    $actual = Get-Hashes (Join-Path $ProjectDir $rel)
+    if ($null -eq $actual)                 { $missing += $rel; continue }
+    if (Test-Sealed $actual $canonHash)    { $uptodate += $rel; continue }
+    if ($hasProjManifest -and $projBase.ContainsKey($rel)) {
+        $base = $projBase[$rel]
+        if (Test-Sealed $actual $base) { $outdated += $rel }                           # untouched; canonical moved forward
+        else { $customized += [ordered]@{ file = $rel; threeWay = ($canonHash -ne $base) } }  # touched
+    } else {
+        $customized += [ordered]@{ file = $rel; threeWay = $true }                      # no base: differs, user decides
+    }
+}
+
+# Orphans: only determinable with the project manifest (we know what belonged to the scaffold).
+$orphan = @()
+if ($hasProjManifest) {
+    $canonNames = $canon.files.PSObject.Properties.Name
+    foreach ($k in $projBase.Keys) {
+        if (($canonNames -notcontains $k) -and (Test-Path (Join-Path $ProjectDir $k))) { $orphan += $k }
+    }
+}
+
+[ordered]@{
+    hasProjectManifest = $hasProjManifest
+    canonicalVersion   = $canon.version
+    variant            = $canon.variant
+    missing            = $missing
+    outdated           = $outdated
+    customized         = $customized
+    orphan             = $orphan
+    uptodate           = $uptodate
+} | ConvertTo-Json -Depth 6

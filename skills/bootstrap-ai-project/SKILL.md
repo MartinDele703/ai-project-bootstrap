@@ -1,0 +1,173 @@
+---
+name: bootstrap-ai-project
+description: Bootstrap a new project directory with an AI-assisted workflow scaffolding (CLAUDE.md 8-step workflow, docs/ai-workflow, docs/agents, custom skills like grill-me/tdd/to-prd, review hooks, git init). Use whenever the user says they are starting a new project and wants it set up for AI-assisted development, asks to "bootstrap this project", "set up the AI workflow", "prepare this repo", "scaffold the project structure", or wants the disciplined AI development workflow installed in a directory — even if they don't name this skill. This is per-PROJECT (run inside the project folder). To update an already-bootstrapped project use upgrade-bootstrap.
+---
+
+# Bootstrap AI Project
+
+Installs a proven AI-assisted modus operandi in a project: the 8-step AI workflow (alignment → PRD → vertical slices → task formatting → TDD → QA → clean-context review → human approval), the workflow docs it references, the agent conventions (local issue tracker, triage labels, domain docs), and the custom skills (21, among them grill-me, grill-with-docs, tdd, to-prd, to-issues, triage, handoff, zoom-out, review-loop and slice-review).
+
+The point is that the scaffolding lands **before** requirements or code, so every later session starts governed by the workflow instead of improvising.
+
+All template files live in `assets/scaffold/` next to this SKILL.md — copy them, don't regenerate them, so the wording of the workflow stays identical across projects.
+
+## Step 0 — Safety check
+
+Run this in the directory the user designates as the new project root (usually the current working directory).
+
+- If `.bootstrap-manifest.json` already exists, the project **was bootstrapped with this scaffold** — do not re-run bootstrap. Tell the user to use `upgrade-bootstrap` to pull scaffold changes, and stop.
+- If `CLAUDE.md` or `docs/ai-workflow/` exist but there is **no** `.bootstrap-manifest.json`, the project is **not** bootstrapped — it just has its own files. Do **not** say "already bootstrapped", and do **not** derive to `upgrade-bootstrap` (that skill is only for projects that already have a manifest). Instead, enter **Step 0b — Adoption mode** below: install the methodology while preserving the project's own content.
+- If the directory contains other files (code, docs), list them and confirm with the user before proceeding. Where the project has its own version of a file the scaffold also ships, the copy **does** overwrite it — backing the original up to `.bootstrap-backup/` and declaring it under `overwritten` first (Step 2, ADR-0007). Report that list; never assume nothing of the project's was touched.
+- If a `SESSION_HANDOFF.md` exists at the project root or in `docs/`, it is the handoff of an older contract: Step 5 migrates its latest block to the handoff in temp and retires the file. Put that in the plan the user approves now — in adoption mode, as a line right below Step 0b/D's coverage map (a line, not a row: it is not an `overwritten` entry), and otherwise next to the file list above. That approval covers it: there is no separate question. If that map turns out to have no rows, Step 0b/D continues without asking anything, so present this line by itself there and get its approval before going on. If the user turns it down, the file stays where it is: Step 5 skips the retirement and Step 6 says the file was kept.
+
+## Step 0b — Adoption mode
+
+Reached from Step 0 when the project has its own `CLAUDE.md` (or `docs/ai-workflow/`) but no `.bootstrap-manifest.json`. Goal: install the 8-step methodology without losing the project's context or identity. Two invariants govern this mode: **the original is never lost** (a verbatim, permanent backup), and **the merge is never applied before the user approves a coverage map** of where each block of their content goes.
+
+Define `$skill` and `$proj` as in Step 2.
+
+### A. Copy the scaffold
+
+Run **Step 2** exactly as written (the `copy-scaffold.ps1` script, which merges into pre-existing directories like `docs/` instead of nesting). This installs the canonical `CLAUDE.md`, all 52 files, and `.bootstrap-manifest.json`, overwriting the project's `CLAUDE.md` with the canonical 8-step template — fine: the script copies every file it is about to overwrite into `.bootstrap-backup/` first, and lists them under `overwritten` in its JSON report. **Keep that report — steps B and D both need it.**
+
+### B. Park the original CLAUDE.md
+
+**First look at `docs/agents/legacy-claude.md`.** If it already exists it is normally the original, parked by an earlier run — leave it exactly as it is and go straight to step C. Read it before trusting it, though: if it is empty, or is plainly not this project's `CLAUDE.md`, **stop and ask the user which file holds their original**, listing what each candidate contains — that file, and the backup this run made of their `CLAUDE.md`: the path its own `overwritten` entry names, plus the un-numbered `.bootstrap-backup/CLAUDE.md` when the two differ, because an earlier ask-branch run leaves the un-numbered slot full and sends this run's copy to `.2`. Say which of them exist. Do not resolve it yourself: telling an unrelated file from an unusually short one is a judgement about *their* project, and both wrong guesses are expensive — classify the wrong file and the project's rules are never merged, move onto the right one and the recovery net is gone. From their answer on, **the file they name is the original** for every step below, resolved in two moves. First, if what they named is a path step A replaced — it appears as the **`file`** of an `overwritten` entry — read that entry's `backup` instead: the live file is the scaffold's now, so their text only survives in the backup. Second, **whatever you ended up reading, if it lives under `.bootstrap-backup/`, copy it to `docs/agents/legacy-claude.original.md` and use that copy from there on**: that directory is excluded from the Step 5 commit, so a file left only there is not preserved, and this branch is the one where the usual name is already taken. Key that on the file you are actually reading, not on the one they pointed at — naming the live `CLAUDE.md` and naming its backup have to end in the same place. And if they say none of them is, there is nothing to classify: skip step C and step E's **block merge** — the insertion of the original's blocks into `## Hard rules`, `docs/agents/domain.md` and `CONTEXT.md` — but **not** step E's map application, which the `overwritten` rows the user approves in step D depend on and which nothing else performs. Then report it. Never move anything on top of `legacy-claude.md` itself.
+
+Otherwise park it, **only if `.bootstrap-backup/CLAUDE.md` exists after the copy**. For this one file take the **un-numbered** path — the opposite of the rule for every other entry. The numbered copies (`.2`, `.3`) hold what a later run overwrote, which by then is the canonical template plus whatever was merged or edited into it; the un-numbered one is the project's own original, and that is what step C has to classify. Everywhere else you want the newest, here you want the oldest.
+
+```powershell
+Move-Item "$proj\.bootstrap-backup\CLAUDE.md" "$proj\docs\agents\legacy-claude.md" -Force
+```
+
+`docs/agents/legacy-claude.md` stays in the repo forever as the recovery net.
+
+However you got here, **write down which `overwritten` entry the file step C is about to classify came from** — the one whose `backup` you just parked, or the one the ask branch resolved to — or that it came from none, which is the case when the user named a file of their own that the scaffold never touched. Step D needs that identity and cannot rederive it.
+
+If **neither** `docs/agents/legacy-claude.md` nor `.bootstrap-backup/CLAUDE.md` exists, there is no original to park and there is nothing for step C to classify — skip step C and step E's **block merge** (the same insertion into `## Hard rules`, `docs/agents/domain.md` and `CONTEXT.md`), but **not** step E's map application: the `overwritten` list is normally non-empty even here, step D still puts every one of those files to the user, and their answers are applied nowhere else. Say exactly that in the Step 6 report instead of the sentence step F would otherwise have you write. That happens when the project had no `CLAUDE.md` at all (Step 0 also routes into adoption on a bare `docs/ai-workflow/`), or when its `CLAUDE.md` was already content-identical to the canonical one, in which case there is nothing of the project's to recover. Never run the `Move-Item` blind: `-Force` does not conjure a missing source, it throws, and it would abort the adoption with the scaffold already landed on the project's files.
+
+### C. Classify the original's content
+
+Read the original **step B identified** — normally `docs/agents/legacy-claude.md`, or whichever file the user named if step B stopped to ask. Split it into blocks — **treat each top-level heading and its body as one block, and any leading title or description before the first heading as its own block**. Classify each block into exactly one destination, **moving text verbatim — never paraphrase or summarize**:
+
+- **Operational rule** (governs behavior, e.g. "never deploy without approval", "don't trust the 2xx as proof of arrival") → the `## Hard rules` section of the canonical `CLAUDE.md`.
+- **Domain knowledge** (what the project does, integrations, technical gotchas, branching model) → `docs/agents/domain.md`, appended under a new `## Project-specific domain` section.
+- **Project description** (the one-line of what this is) → `CONTEXT.md` (created in Step 3).
+- **Doesn't fit / unsure** → leave it only in the original and mark it on the map for the user to decide.
+
+### D. Present the coverage map and get approval
+
+Show the user a table: every block of the original → its destination, quoting the block verbatim. Make any unassigned ("doesn't fit") blocks visible.
+
+**The map must also cover every other entry in the copy's `overwritten` list.** Those are the project's own files the scaffold just replaced, and each one is a decision, not a default: keep the scaffold's version (often right — it is the update you came to deliver), restore the project's from `.bootstrap-backup/`, or merge the two. A `.gitignore` or a `.gitattributes` almost always needs merging, because the scaffold's rules are additions and the project's own entries are still needed. Nothing is lost either way — each original sits at the `backup` path its own `overwritten` entry names — but say out loud what each file got. **Only entries under `overwritten` get a row.** A file the report lists under `created`, or one it omits entirely because what was there was already identical, has no backup behind it and so has nothing to decide. Within that list there is exactly one exemption, and it is not about `CLAUDE.md` by name: **the entry whose content step C is classifying is off the map**, because step C is going through its blocks one by one and a keep/restore/merge row on top of that would be the same decision asked twice. That is the entry step B wrote down — it is the only step that knows, and it covers the ordinary park and the ask branch with one rule. Do **not** try to recover it by comparing paths: step B *moves* the file it parks and *copies* the one it preserves, so by the time step C reads it nothing sits at the `backup` path any more and a path comparison is false in every run, exempting nothing. Everything else in `overwritten` needs a row, or that work is reverted with nobody asked: that includes every run where step B parked nothing because `legacy-claude.md` already existed, and the run where the user named the un-numbered backup while this run's entry names a numbered one — there the numbered copy is the project's live `CLAUDE.md` as this run overwrote it, step C never touches it, and it still needs its row. Read that backup before writing the row instead of assuming what it holds — it is whatever the project's `CLAUDE.md` was when this run overwrote it, which after an earlier adoption is the canonical template plus everything merged or edited into it since.
+
+Get a **single explicit approval** (the user may correct individual rows before approving). Do **not** write the merge until approved. If the map has no rows at all — nothing to classify and nothing overwritten — say so and continue; there is nothing to approve.
+
+### E. Apply the merge
+
+After approval, **apply the map first** — every `overwritten` row the user approved as "restore" or "merge" is work nobody else does: copy the file back from its `backup` path, or merge the two by hand. A row approved and not applied is the same silent revert the map exists to prevent. **Then apply the block merge**: insert operational-rule blocks into `## Hard rules` as new bullets (verbatim); append domain blocks under `## Project-specific domain` in `docs/agents/domain.md` (verbatim); seed `CONTEXT.md` with the description. That order is not cosmetic — `CLAUDE.md` can carry a row of its own, and a "restore" applied *after* the block merge would copy the backup straight over the rules step C just merged in, leaving step F to report blocks that are no longer there.
+
+Three things govern that insertion, and they only bite on a re-run over an already-adopted project. **Ask "is it already there" of the destination, and each destination answers differently.** In `## Hard rules` a block arrives reworded as bullets, so its original heading-plus-body string is never found there: the question is whether some existing bullet already states that rule. In `docs/agents/domain.md` blocks are appended verbatim, so it is a literal search for the block's text under `## Project-specific domain`. `CONTEXT.md` is not a presence test at all: **seed it only if it is missing or still the stub**, never over a populated one — after a `grill-with-docs` that file is the project's glossary, and the description would overwrite it. Skipping what is already there is what keeps a re-run from leaving the project a second copy of every rule.
+
+And **write down what you skipped and why**, keeping the two reasons apart: a rule the destination already stated, versus a description not seeded because `CONTEXT.md` was already populated. They are not the same fact and step F reports them differently. Step D showed the user a map row for every block, so a skip that goes unrecorded becomes a step F report claiming work that did not happen — the same drift as the one the order above prevents, pointing the other way. Leave the original untouched as the permanent backup.
+
+The `.bootstrap-manifest.json` copied in step A records the canonical `CLAUDE.md` hash as its base. When step E merged blocks in, the project's `CLAUDE.md` now differs from that hash, so a future `upgrade-bootstrap` automatically classifies it as **customized** and never overwrites it — no extra sealing needed. When no block merge ran, the file *is* the canonical one and gets classified as up to date, which is also correct: there is nothing of the project's in it to protect.
+
+### F. Continue with Steps 3–6
+
+Proceed to Step 3 (project-specific files — which in adoption mode creates **only what is missing**: never write a stub over an existing `README.md` or `CONTEXT.md`, whether step E seeded it or the project brought it. Neither file is in the scaffold, so neither has a copy in `.bootstrap-backup/` to recover), Step 4 (MCP servers — the `.mcp.json` menu applies to adopted projects too), Step 5 (git), and Step 6 (report). In the Step 6 report, state where the original ended up — preserved at `docs/agents/legacy-claude.md` with the list of which blocks went to `## Hard rules` vs `docs/agents/domain.md`, which ones step E skipped because the destination already stated them, and whether the description was skipped because `CONTEXT.md` was already populated; or, when step B found **neither** `docs/agents/legacy-claude.md` nor `.bootstrap-backup/CLAUDE.md`, that there was no original to classify — either the project never had a `CLAUDE.md` of its own, or the one it had was already the canonical template, and say which; or, when step B stopped to ask, why it could not tell which file was the original, and then either which one the user named and where it ended up, **or that they could not identify one either — in which case say that nothing was classified, not that no original exists: the run failed to find it, which is not the same thing**. Never claim the file exists without having checked that it does — parked by this run or by an earlier one. **And in every state, report what each approved `overwritten` row got**: which of the project's files kept the scaffold's version, which were restored from `.bootstrap-backup/`, and which you merged by hand. Where step C never ran that is the only thing the adoption did to the project's own files, and a report that omits it describes the run as having done nothing.
+
+## Step 1 — Project info
+
+Infer the project name from the directory name or the user's message. Only ask if it's genuinely unclear. Ask for a one-line description if the user hasn't given one — it seeds README and CONTEXT.md.
+
+## Step 2 — Copy the scaffold
+
+Copy the entire `assets/scaffold/` tree into the project root by running the bundled script. On Windows (adjust `$skill` to this skill's directory and `$proj` to the project root):
+
+```powershell
+$skill = "<base directory of this skill>"
+$proj  = "<project root>"
+pwsh -NoProfile -File "$skill\scripts\copy-scaffold.ps1" -SkillDir $skill -ProjectDir $proj
+```
+
+The script copies file-by-file, merging into directories the project already has. Do NOT replace it with `Copy-Item <dir> -Recurse` (nests into `docs\docs` / `.agents\.agents` when the destination directory exists) or a `scaffold\*` wildcard (dot-directory expansion varies between PowerShell versions). It also lands `gitignore.txt` as `.gitignore` (stored under that name so the skill repo doesn't treat it as its own ignore file).
+
+Before committing, verify the copy landed cleanly: `.agents\skills` and `.claude\commands` have as many entries as the scaffold itself does (count them there — a number written here goes stale the next time a skill is added), `.claude\settings.json` and `.claude\hooks\review-loop-trigger.ps1` and `.claude\hooks\alignment-gate.ps1` exist, and neither `.agents\.agents` nor `.claude\.claude` exists.
+
+The script prints a JSON report on stdout: `created` lists the files it added, `overwritten` lists the project's own files it replaced, each with the path where it backed the original up — normally `.bootstrap-backup/<same relative path>`, but numbered `.2`, `.3` where a backup was already there, so read the `backup` field instead of deriving it from `file`. A file that differs only in CRLF vs LF is not reported — that is `core.autocrlf` noise, not a change. **Report the `overwritten` list to the user.** On an empty project directory it comes back empty and there is nothing to say. On a project that already had files it is the list of what the copy replaced: in adoption mode (Step 0b/D) every entry needs a decision before the merge; otherwise report it and continue.
+
+This delivers: `CLAUDE.md`, `.gitignore`, `.gitattributes` (keeps `*.sh` in LF on every checkout, so bash on Linux or WSL can run them), `skills-lock.json`, `.bootstrap-manifest.json` (scaffold version manifest, used by `upgrade-bootstrap`), `.agents/skills/` (21 skills — 17 synced via `skills-lock.json` + `review-loop`, `slice-review`, `verify-downstream-arrival` and `debug-source-first`, bundled here), `.claude/commands/` (21 commands), `.claude/agents/` (the read-only reviewer agents `/slice-review` fans out to, with the file-mutating tools denied by declaration), `.claude/settings.json` + `.claude/hooks/review-loop-trigger.ps1` (auto-runs `review-loop` on each slice commit/push or PR) + `.claude/hooks/alignment-gate.ps1` (stops the first code edit of the session and offers to align before coding), `docs/ai-workflow/` (11 docs), `docs/agents/` (3 docs).
+
+## Step 3 — Project-specific files
+
+Create these **only where they do not already exist** (they are per-project, so they are not in the scaffold — which also means `copy-scaffold.ps1` never backed them up and they are in no `overwritten` list: overwrite one and it is gone for good, unlike every other file this skill touches). In adoption mode an existing `README.md` or `CONTEXT.md` is the project's own; leave it exactly as it is.
+
+- `README.md` — `# <Project Name>` plus the one-line description.
+- `CONTEXT.md` — stub with the project name and a note that the canonical glossary/domain model will be produced by `grill-with-docs` during requirements closing. Don't invent domain content.
+- `docs/adr/.gitkeep` — ADRs accumulate here as decisions crystallise.
+- `.scratch/` directory — local issue tracker home (gitignored by design).
+
+## Step 4 — MCP servers (.mcp.json)
+
+Ask which MCP tools this project will use, then generate a committed `.mcp.json` (project scope). Tokens are referenced via `${VAR}` — never written into the file.
+
+Present the catalog with `AskUserQuestion` (multiSelect): **firebase**, **github**. Let the user pick zero or more. If `AskUserQuestion` is unavailable (non-interactive or agent context), don't block: infer the servers from the project's `CLAUDE.md`/context, or pick none if it's unclear, and note the inferred choice in the Step 6 report.
+
+Then run the generator (adjust `$skill` to this skill's directory and `$proj` to the project root):
+
+```powershell
+$skill   = "<base directory of this skill>"
+$proj    = "<project root>"
+# $picks = the servers the user selected, e.g. @("firebase","github")
+$servers = ($picks -join ',')   # -> "firebase,github" (no spaces)
+pwsh -NoProfile -File "$skill\scripts\gen-mcp-json.ps1" -ProjectDir $proj -Servers $servers
+```
+
+The script ships with this skill at `$skill\scripts\gen-mcp-json.ps1`. If that path doesn't exist or the script exits non-zero, stop and report it — don't proceed to the Git step with a half-written `.mcp.json`.
+
+The script writes `<proj>/.mcp.json` with only the chosen servers and prints a JSON summary with `requiredEnvVars` and `prereqs`. If the user picks nothing, it writes no file — that's fine, skip it.
+
+`.mcp.json` is a per-project generated file (like README/CONTEXT): it is NOT part of the scaffold, NOT tracked by `.bootstrap-manifest.json`, and `upgrade-bootstrap` never touches it. It is committed with the rest of the scaffolding in the Git step.
+
+Keep the script's `requiredEnvVars` / `prereqs` output for the final report (Step 6).
+
+## Step 5 — Git
+
+If the project directory is not **its own** git repository root — check with `git -C $proj rev-parse --show-toplevel` and confirm it equals `$proj`, not a parent repo the project happens to sit inside — run `git init -b main` so it gets its own repository. Never commit the scaffolding into an enclosing parent repo.
+
+This skill does not set any git identity: commits use the user's own git config. Before committing, verify one exists — `git config user.name` and `git config user.email` must both return a value. If either is missing, ask the user to configure their identity first and wait; do not invent one.
+
+**Retire the inherited session handoff.** Only if Step 0 found a `SESSION_HANDOFF.md` and the user approved its retirement. Define `$skill` and `$proj` as in Step 2. It runs here, after the repository exists and before the commit: the handoff path is keyed on the git toplevel, which is `$proj` only from this point on.
+
+First check that the files can be retired, before touching the handoff:
+
+```powershell
+pwsh -NoProfile -File "$skill\scripts\retire-session-handoff.ps1" -ProjectDir $proj -Check
+```
+
+It changes nothing. If it exits non-zero, relay its message, skip both the migration and the retirement, and say so in the Step 6 report. Its one designed refusal is a file whose staged changes differ from both HEAD and the disk; any other error (the script not found, a failed `git` call) is not that refusal: report it as an error, not as staged changes. Checking first matters because the migration rotates `.prev`: a refusal after it would leave the files in place, and a re-run would rotate `.prev` again and push the developer's live handoff out.
+
+Then migrate one block: the most recent one. It is usually the top block, but check the dates in the headings. When both files exist, take the more recent of the two; with no dates, go by the file's last commit or, for an untracked file, its modification time. Write it to the handoff path in a single write, in that rule's format: the current state plus references to commits, issues and files, not a transcript. Move whatever already sits at that path to its `.prev` first, once: the rule keeps a single previous generation. If the block describes closed work, or is old enough that the code has moved past it, say so in one line and create nothing. The path comes from the `### Handoff` section of the project's `CLAUDE.md`, the one Step 2 installed. If Step 0b/E restored the project's own and it has no such section, use the rule in `$skill\assets\scaffold\CLAUDE.md` and carry the gap to the Step 6 report.
+
+Then retire the files with this skill's own copy of the script:
+
+```powershell
+pwsh -NoProfile -File "$skill\scripts\retire-session-handoff.ps1" -ProjectDir $proj
+```
+
+Tracked files go out with `git rm`, so the removal lands in the commit below. Untracked and ignored ones — all of them, in a repository `git init` just created — go to `.bootstrap-backup/`, numbered `.2` when a backup is already there. It prints `{ removed[], backedUp[{file, backup}] }`: keep it for Step 6, and use the `backup` field as reported; do not derive it from `file`. The `-Check` above already ruled out its one refusal. If it exits non-zero anyway, relay its message, and do not assume it retired nothing: a failed `git` call on the second file stops it after the first one was already removed or backed up, so check `git status` and `.bootstrap-backup/` and say in the Step 6 report what actually moved.
+
+Then commit everything as `chore: project scaffolding (AI workflow + skills)` — **except `.bootstrap-backup/`**. That directory holds copies of the project's own files and is deliberately not gitignored so the user sees it; whether it belongs in history is their call, not the skill's. Stage with an exclusion rather than a bare `git add -A` — `git add -A -- . ':!.bootstrap-backup'` — and point the directory out in the Step 6 report.
+
+If it is already its own repo root, still verify the identity and commit the scaffolding files on the current branch.
+
+## Step 6 — Report and hand off
+
+Report: files created (counts per area), git status, and the immediate next step of the workflow — closing requirements with `/grill-me` or `/grill-with-docs`, which produces CONTEXT.md content and the first ADRs, followed by `/to-prd` and `/to-issues`. If a `.mcp.json` was generated, also report the **environment variables to set** (as persistent environment variables) and prerequisites from the script's summary — e.g. `GITHUB_PERSONAL_TOKEN` (+ Docker running), or `firebase login` once. The MCP servers won't connect until those env vars exist; this is expected, not an error.
+
+Do not fill in the placeholders of `docs/ai-workflow/PARALELISMO-DEL-PROYECTO.md` (its `{{…}}` marks): they are the project's lane data, filled in when the project opens its first wave of parallel lanes, and until then `.claude/scripts/abrir-carril.ps1` refuses to open a lane. Leave them as they come.
+
+If Step 0 found a `SESSION_HANDOFF.md`, report the script's output: each file under `removed` and, for each one under `backedUp`, its `backup` path; whether a block was migrated to the handoff in temp (and to which path) or why none was; and, when the project's `CLAUDE.md` has no `### Handoff` section, that it should merge it: a next session only finds the migrated handoff through that rule. If the `-Check` refused, say that nothing was retired; if the script failed, say what Step 5 found had actually moved. Relay its message either way. If the user turned the retirement down, say the file was kept where it was.
+
+Do not start requirements, PRDs, or code as part of this skill — bootstrap ends here by design (step 1 of the workflow needs the human present).

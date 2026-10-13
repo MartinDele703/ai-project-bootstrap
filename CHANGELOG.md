@@ -1,0 +1,246 @@
+# Changelog
+
+## v2.2.3 — 2026-10-13
+
+### Fixed — `upgrade-bootstrap` finds the canonical scaffold itself, and a variant switch asks per file
+
+- Step 1 runs `resolve-canonical.ps1`: when the skill the project's manifest names is installed, it
+  uses it; when it is not and exactly one bootstrap skill is installed, it uses that one and says so.
+  With several or none it lists them, the agent asks you, and re-runs with `-Skill <your answer>`.
+  Before, a project bootstrapped with a variant you no longer have (a copy received before this
+  skill existed) stopped with "Canonical scaffold has no manifest" and the manifest had to be edited
+  by hand.
+- When the manifest came from another variant, every `outdated` file is put to you one by one,
+  because its difference may be the other variant's content rather than an update. A file you keep
+  stays out of the re-sealed manifest (`reseal-manifest.ps1 -VariantSwitch`), so the next upgrade
+  asks again instead of overwriting it.
+
+### Added — the public export ships `CHANGELOG.md`
+
+- `tools/export-changelog.ps1` copies this file to the public repo without the sections and list
+  items that belong to variants not published there (by structure: a `###` section whose title
+  carries a marker, with its body; an item whose text does), and lists what it dropped. The leak
+  gate still checks the result, so a marker left in a loose paragraph aborts the export.
+
+### Fixed — scaffold: three fixes ported from a project in use
+
+- `review-loop-trigger` hook: a here-string commit message no longer hides the `git push` that
+  follows it. An apostrophe inside `@'…'@`, or a bare `"` inside `@"…"@`, masked the rest of the
+  command and the push went unseen.
+- `marcar-done.ps1`: `Status: done (note)` already counts as done and keeps its note; before, it was
+  rewritten to a bare `Status: done`.
+- Workflow doc § 1: the alignment gate offers the grill and waits for your decision; the call is
+  yours, not the gate's.
+
+## v2.2.2 — 2026-10-03
+
+### Fixed — `upgrade-bootstrap` no longer overwrites your files or misses a narrowed hook
+
+- Re-sealing the manifest no longer records as a base a file the project already had before the
+  scaffold added it. That file keeps showing as customized, so the next upgrade asks before touching
+  it instead of overwriting it. A project adopted for the first time (no manifest yet) is sealed as
+  before.
+- Merging `.claude/settings.json` now widens the `matcher` of a hook you already have with the
+  canonical alternatives it lacks (for example `Bash` becomes `Bash|PowerShell`), keeping your own
+  alternatives first. Before, it reported "nothing to do" and the hook did not fire on commits made
+  from PowerShell.
+
+## v2.2.1 — 2026-10-02
+
+### Fixed — reporting the retirement of the inherited handoff
+
+- The bootstrap skills' final report now covers every outcome of retiring a `SESSION_HANDOFF.md`
+  that Step 0 found: retired, refused by the `-Check`, failed partway, or declined by you. Before,
+  its opening condition read as if it applied only when the file had been retired.
+- `upgrade-bootstrap`'s final report now includes the `-Check` refusal and, after a failure, what
+  actually moved, as its step 4b already asked.
+- The header of `retire-session-handoff.ps1` no longer says the removal is never committed: the
+  bootstrap commits it; `upgrade-bootstrap` leaves it staged for you.
+
+## v2.2.0 — 2026-10-02
+
+### Changed — the session handoff lives outside the repo
+
+There is one handoff contract now, the one `/handoff` already followed: it writes to
+`<OS temp dir>/claude-handoff/<key>.md`, where `<key>` is the worktree's top-level path with every
+character outside `[A-Za-z0-9]` replaced by `-`, keeping one previous generation as `<key>.prev.md`.
+When a session opens with "continue" or "continuemos", it reads that file and the current
+`git diff`; if the file does not exist it says so and stops. The rule lives in the `### Handoff`
+section of the scaffold's `CLAUDE.md`. The slice-size rule no longer asks you to declare an
+oversized slice "in the session handoff": the `Slice-Close:` trailer is the record.
+
+### Added — the inherited `SESSION_HANDOFF.md` leaves the repo
+
+`upgrade-bootstrap` lists any `SESSION_HANDOFF.md` (at the root or in `docs/`) in its plan. Once you
+approve, it migrates the most recent block to the new handoff path and runs
+`retire-session-handoff.ps1`: a tracked file leaves with `git rm` (staged, for you to commit), and an
+untracked or ignored one is moved to `.bootstrap-backup/`. The bootstrap skills do the same when
+they find one (in adoption mode, as a line under the coverage map), after `git init` and before
+their commit; declining it there leaves the file where it is.
+
+### Fixed — scripts no longer change the console's code page
+
+`review-marker.ps1`, `abrir-carril.ps1` and the `review-loop-trigger` hook set
+`[Console]::OutputEncoding` to UTF-8, which belongs to the console and stayed set for everything
+started there afterwards. They now read git's output as UTF-8 per call through
+`.claude/scripts/lib/git-utf8.ps1`.
+
+## v2.1.0 — 2026-09-23
+
+### Changed — every scaffold skill is agent-invocable again
+
+In v2.0.0 nine skills were user-invoked (`grill-me`, `grill-with-docs`, `to-prd`, `to-issues`,
+`triage`, `handoff`, `to-questionnaire`, `setup-matt-pocock-skills`, `zoom-out`; the last three
+already were before v2): only a human could type them, and the agent stopped mid-workflow to ask you
+to. All nine are model-invoked now, and each command's description carries a trigger formula (copied
+from its `SKILL.md` where it had one; `grill-me`, `grill-with-docs` and `to-questionnaire` never had
+one and gained it), so the agent can run the next workflow step itself (ADR-0013).
+
+The cost is context: the command descriptions loaded on every request grow from 5,709 to 9,217
+characters. Take it with `upgrade-bootstrap`.
+
+### Added — issues are marked `done` when their slice closes
+
+Triage has a sixth state, `done`. When `/review-loop` closes a slice with no High finding left open,
+it runs `.claude/scripts/marcar-done.ps1`, which rewrites the `Status:` line of every issue that the
+closing commit's `Slice-Close:` trailer cites **by path**
+(`Slice-Close: .scratch/<feature>/issues/07-<slug>.md — <what closed>`). A trailer that cites no
+path marks nothing, and the loop says so.
+
+### Fixed — the review-loop hook lost slice closes declared from PowerShell
+
+v2.0.0 widened the `review-loop-trigger` matcher to `Bash|PowerShell`, so the hook started receiving
+commands from the PowerShell tool — but it still parsed them with **bash** quoting, where `\`
+escapes. In PowerShell `\` is an ordinary character and a quoted Windows path *ends* in one, so the
+literal walker ran past the closing quote, masked to the end of the line, and the trigger vanished:
+`git -C "C:\repo\" commit` with a declared `Slice-Close:` trailer fired **nothing, silently**. Same
+for `Set-Location "C:\tmp\"; git commit` and `git -C "$env:REPO\" push`.
+
+The hook now picks the quoting grammar from the event's `tool_name`: backtick and doubled quotes for
+PowerShell, `\` for bash, and bash for an event without the field. Nothing changes for the Bash tool.
+
+No action needed beyond taking the new hook (`upgrade-bootstrap`). If you closed slices from the
+PowerShell tool with a quoted path ending in `\`, those closes never got a review turn — the marker
+still holds the range, so the next close reviews them together.
+
+## v2.0.0 — 2026-09-21
+
+Skills refreshed from upstream by three-way merge, a thinner `CLAUDE.md`, lanes for parallel work,
+and manifests re-sealed with line-ending-independent hashing. **Two doctrine changes** (below) mean
+your project's `CLAUDE.md` may now contradict the skills it receives: check it after upgrading.
+
+### How to update
+
+1. In your clone of this repository: `git pull`
+2. Deploy the skills: `pwsh -NoProfile -File tools\sync-skills.ps1`
+3. If you have user-level copies of `research`, `debug-source-first` or `verify-downstream-arrival`
+   in `~/.claude/skills/`, delete them: the scaffold now ships its own, and a user-level skill with
+   the same name can hide the project's (seen with `research`).
+4. Start a new Claude Code session.
+5. In **each** bootstrapped project, say *"update the bootstrap"* (`upgrade-bootstrap`), then do the
+   `CLAUDE.md` check below.
+
+Manifests are now hashed with normalized line endings (CRLF and LF hash the same), and the upgrade
+re-seals your project's manifest that way. Your project's manifest still holds the old raw hashes
+until this upgrade re-seals it; they are still recognized, including for a file that was sealed as
+CRLF and is LF now (or the reverse). One case is not: a file sealed with **mixed** line endings
+(some lines CRLF, some LF) whose line endings changed since can show up as customized, and keeps
+doing so on later upgrades until you take the canonical version.
+
+### Doctrine change 1 — TDD is `red → green`
+
+The refactor step left the TDD cycle (ADR-0004): it happens in the review stage, where the review
+loop already runs after every slice close. If your `CLAUDE.md` says `red → green → refactor`, or
+otherwise promises three TDD stages, rewrite it to `red → green`.
+
+### Doctrine change 2 — the review-loop and alignment-gate mechanics moved out of `CLAUDE.md`
+
+The template `CLAUDE.md` now keeps three sentences and a pointer for each; the detail lives in
+`docs/ai-workflow/AI_DEVELOPMENT_WORKFLOW.md` (§7 for the review loop, §1 for the alignment gate).
+The hooks enforce both, so no rule changed. `upgrade-bootstrap` decides file by file: the workflow
+doc usually lands on its own, while a customized `CLAUDE.md` is kept unless you pick the assisted
+merge. **Keep the mechanics in one place only**: either in your `CLAUDE.md` or in the workflow doc,
+never both, and make sure your `CLAUDE.md` does not point to a section that did not land.
+
+### Lanes for parallel work
+
+New files: `docs/ai-workflow/PARALELISMO.md` (the norm), `PLAN-DE-OLA.md` (wave plan),
+`BRIEF-DE-CARRIL.md` (lane brief), `.claude/scripts/abrir-carril.ps1` (opens a lane), and
+`docs/ai-workflow/PARALELISMO-DEL-PROYECTO.md`, your project's data. That last one arrives with
+**unfilled placeholders on purpose**: neither the bootstrap nor the upgrade fills them, and
+`abrir-carril.ps1` refuses to open a lane while any remain (`-DryRun` only warns).
+
+### Skills
+
+- **New:** `grilling` and `domain-modeling` (`grill-me` and `grill-with-docs` are now short pointers
+  to them), `diagnosing-bugs`, `wizard`, `to-questionnaire`, `research`, `resolving-merge-conflicts`,
+  `git-guardrails-claude-code`, `verify-downstream-arrival`, `debug-source-first`.
+- **Updated from upstream, names kept:** `to-prd`, `to-issues`, `triage`, `handoff`,
+  `setup-matt-pocock-skills`, `tdd`.
+- **Invocation policy:** skills only a human types (`grill-me`, `grill-with-docs`, `to-prd`,
+  `to-issues`, `triage`, `handoff`, `to-questionnaire`, `setup-matt-pocock-skills`, `zoom-out`) are
+  user-invoked and no longer load their description into every request.
+- **Reviewers are declared agents** (`.claude/agents/slice-review-*.md`): write tools are denied by
+  declaration, not by a prose request.
+
+### Scaffold
+
+- A secrets rule in `CLAUDE.md`: never hardcode a secret; a leaked one is rotated, not just deleted.
+- Document templates in `docs/ai-workflow/` (`PRD_TEMPLATE.md`, `TASK_TEMPLATE.md`,
+  `RUNBOOK_TEMPLATE.md`).
+- Firebase in the MCP catalog.
+- `.gitattributes` with `*.sh text eol=lf`.
+- The `review-loop-trigger` hook also fires on commits made with the PowerShell tool.
+
+## v1.0.0 — 2026-09-18
+
+First tagged release. If your copy of these skills is from June, this is everything you are missing.
+The v2 work in progress is **not** part of this release.
+
+### How to update
+
+1. In your clone of this repository: `git pull`
+2. Deploy the skills: `pwsh -NoProfile -File tools\sync-skills.ps1`
+3. Start a new Claude Code session (the skills load at session start).
+4. In **each** bootstrapped project, open Claude Code and say *"update the bootstrap"*. That runs
+   `upgrade-bootstrap`, which shows the delta and applies it with your approval. Files you customized
+   are put to you as a decision, never overwritten silently.
+
+If `upgrade-bootstrap` reports a file you never touched as customized, look at the diff before
+deciding: line-ending hashing under `core.autocrlf` is a known open issue.
+
+### Review loop — it now converges
+
+The loop used to end at its 5-turn cap, fixing its own comments turn after turn. That is fixed:
+
+- **Turn cap is 2.** A slice can declare `Review-Rigor: light` next to its `Slice-Close:` trailer
+  (local tools, tests only, behavior-preserving refactors): it then runs **one** turn with the Bugs
+  and Tests focuses only, and only a High blocks the close.
+- **Comments no longer block the close.** A finding whose fix is only prose (comment, docstring,
+  commit message, internal doc) is **Low**, unless end users read the text or it contradicts the code.
+  Instructions in the files that govern the agent (`CLAUDE.md`, `.claude/`, `.agents/`,
+  `docs/ai-workflow/`, `docs/agents/`) still count as behavior.
+- **Prose from an earlier turn is not re-edited**, and a turn whose unreviewed delta is only prose
+  closes the loop.
+- **The confidence pass scores the suggested fix too.** A true finding with a bad suggestion keeps its
+  severity, and its suggestion is marked REJECTED instead of being applied.
+- **Writing rules for fixes** (step 5): a scripted replace that matches nothing must abort, and the
+  prose that justifies a fix says only what was checked.
+- **Incremental review:** each turn reviews only what changed since the last review (the review
+  marker, `.claude/scripts/review-marker.ps1`), not the whole branch again.
+- **Declared trigger:** the hook fires on a commit with a `Slice-Close:` trailer, on `git push` and on
+  `gh pr create` in a feature branch, plus a safety net past ~400 unreviewed lines. A slice made only
+  of `.md` documentation does not trigger it.
+- **Reviewer:** `/slice-review` is a local multi-agent reviewer the agent can launch itself (the
+  built-in `/code-review` joins it on turn 1). It adds a mutation check on turn 1 and a whole-slice
+  coherence pass at close.
+
+### Bootstrap and scaffold
+
+- **`alignment-gate` hook:** the first code edit of a session is stopped once, so the agent offers
+  `/grill-me` or `/grill-with-docs` before coding.
+- **The copy backs up what it overwrites** into `.bootstrap-backup/` and reports every replaced file.
+- **Adoption mode** for projects that already have a `CLAUDE.md`: the original is preserved at
+  `docs/agents/legacy-claude.md` and merged only with your approval.
+- **`bootstrap-ai-project`:** a shareable variant with none of the in-house MCP servers, a generic issue tracker, and no change
+  to your git identity.

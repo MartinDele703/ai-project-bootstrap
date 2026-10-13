@@ -1,0 +1,113 @@
+---
+name: upgrade-bootstrap
+description: Use to update a project that was already bootstrapped with a bootstrap-*-project skill when the scaffold has since changed (new files, edited rules, new skills like review-loop). Detects what is missing, outdated, or customized using the project's .bootstrap-manifest.json (with a fallback for legacy projects without one), and applies the delta with your approval — never overwriting your customizations. Trigger whenever the user wants to "actualizar/sincronizar el bootstrap", "traer los cambios nuevos del scaffold", "traé las skills nuevas (review-loop, etc.)", "poné al día el scaffolding de este proyecto", "mergeá los cambios del bootstrap acá", "sync the workflow scaffolding", or mentions a bootstrapped project being on an older/outdated scaffold version. Run this inside the already-bootstrapped project, not in the bootstrap-skills repo. Do NOT use to bootstrap a brand-new project (use your bootstrap-*-project skill), to run the review loop on a PR (use review-loop), or to update npm/package dependencies.
+---
+
+# Upgrade Bootstrap
+
+Update an already-bootstrapped project to the current scaffold, without clobbering what the project customized.
+
+Re-running `bootstrap-*-project` does NOT work for this — its safety check stops when `CLAUDE.md`/`docs/ai-workflow/` already exist. This skill applies the *delta* instead.
+
+## How it decides (merge-base of 3 hashes)
+
+For each scaffold file it compares three hashes — **base** (what the manifest recorded at install), **actual** (what's in the project now), **canonical** (the current scaffold). That yields: missing, up-to-date, outdated-safe (`actual==base`, safe to update), customized (`actual!=base`, never overwrite), or orphan (in project, not in canonical). Without a project manifest (legacy), it can only tell up-to-date from different — different files are shown as diffs for you to decide.
+
+## Steps
+
+### 1. Locate the project and the canonical scaffold
+
+- The project is the current working directory unless the user points elsewhere.
+- Resolve the canonical scaffold with the script. It reads the manifest's `generatedFrom` and checks what is installed:
+
+```powershell
+pwsh -File <this-skill>/scripts/resolve-canonical.ps1 -ProjectDir "<project>"
+```
+
+It prints JSON `{ skill, scaffold, generatedFrom, resolvedBy, variantSwitch, candidates }`: `scaffold` is the canonical scaffold for every step below, and `skill` is the project's bootstrap skill (steps 4b and 5b take their script and their `upgrade-extras.md` from it). `resolvedBy` is `manifest` when the skill the manifest names is installed, or `only-installed` when it is not (or the project has no manifest) and exactly one bootstrap-*-project skill is installed: that one is taken, and the manifest's bases still classify every file. That is the project bootstrapped with one variant and upgraded on a machine that only has another: nothing to edit by hand, and step 5 re-seals `generatedFrom` to the skill used. When it is also `variantSwitch: true` (the manifest named another variant), those bases belong to the other variant, so an untouched file that differs from the canonical may differ by variant (`CLAUDE.md`, `docs/agents/issue-tracker.md`, the workflow doc) and not by an upstream update, and nothing here can tell the two apart: step 4 then puts every `outdated` file to the user one by one instead of overwriting it. Carry `resolvedBy` and `variantSwitch` to the step 3 report. When the script exits non-zero it says why (no bootstrap skill installed, or several and none is the manifest's) and lists the candidates; a manifest it cannot parse stops with the parser's error and no candidate list. Ask the user which skill the project belongs to, then run the script again with `-Skill <their answer>`: it checks that skill is installed with a scaffold, returns `resolvedBy: "user"`, and computes `variantSwitch` for it (true when the manifest named a different skill), so the steps below read the same JSON either way.
+
+### 2. Run the comparison
+
+```powershell
+pwsh -File <this-skill>/scripts/compare-scaffold.ps1 -ProjectDir "<project>" -CanonicalScaffold "<canonical scaffold>"
+```
+
+This prints JSON with `missing`, `outdated`, `customized`, `orphan`, `uptodate`, `hasProjectManifest`, `canonicalVersion`, `variant`.
+
+### 3. Report
+
+Summarize the JSON grouped by category, with counts. Be explicit about what each action will do. If `hasProjectManifest` is false, tell the user this is a legacy adoption run: customizations and old-but-untouched files can't be distinguished, so they appear under "different — your call". If step 1 resolved by `only-installed` or `user`, say which skill the manifest named and which one the upgrade uses; with `variantSwitch: true`, say also that the `outdated` files will be put to the user one by one, because each may carry the other variant's content rather than an update.
+
+Also check for an inherited `SESSION_HANDOFF.md` at the project root and in `docs/`. The comparison does not see them (they are not part of the scaffold), so list each one that exists in the plan too, as "retired: latest block migrated to the handoff in temp, then removed" (step 4b).
+
+### 4. Apply, with the user's approval
+
+Get explicit approval before writing anything. Then:
+
+- **missing** → copy from the canonical scaffold into the project (same relative path), creating the parent directory first if it does not exist — the scaffold does add new directories (`.claude/scripts/`), and a plain copy into a missing parent fails. Special case: the canonical key `.gitignore` is sourced from `gitignore.txt` in the scaffold. Special case `.claude/settings.json`: copy it only if absent; if the project already has its own, treat it as the `settings.json` merge below instead of a plain copy.
+  Do not fill in the placeholders of `docs/ai-workflow/PARALELISMO-DEL-PROYECTO.md` (its `{{…}}` marks): they are the project's lane data, filled in when the project opens its first wave of parallel lanes, and until then `.claude/scripts/abrir-carril.ps1` refuses to open a lane. Leave them as they come.
+- **outdated** → overwrite the project file with the canonical version. **Unless step 1 returned `variantSwitch: true`:** then treat every `outdated` file like a `customized` one below (show the diff, per-file consent), because its base is the other variant's and the difference may be variant content, not an update.
+- **customized / different** → show the diff (canonical vs project). Offer, per file: skip (keep yours), or an assisted merge where you help integrate the new bits into the user's version. Never overwrite without per-file consent. **Special case `.claude/settings.json`:** do NOT diff-merge by hand — run `merge-settings.ps1` (below), which adds every missing canonical hook (`review-loop-trigger`, `alignment-gate`, and any future ones) and widens the matcher of a hook already present with the canonical alternatives it lacks, idempotently and without touching the rest of the user's config.
+- **orphan** → list only; do not delete. Mention the user can remove them by hand.
+
+When copying `.gitignore`, read from `<canonical scaffold>/gitignore.txt`.
+
+**Merge of `.claude/settings.json`** (whenever it appears in `missing` with a pre-existing file, or in `customized`):
+
+```powershell
+pwsh -File <this-skill>/scripts/merge-settings.ps1 -ProjectSettings "<project>/.claude/settings.json" -CanonicalSettings "<canonical scaffold>/.claude/settings.json"
+```
+
+It is idempotent — running it twice never duplicates any hook. If the project had no `settings.json`, it copies the canonical one verbatim.
+
+### 4b. Retire the inherited session handoff
+
+Only if step 3 listed a `SESSION_HANDOFF.md`. The approval for the plan covers it: there is no separate question.
+
+First, check that the files can be retired, before touching the handoff:
+
+```powershell
+pwsh -File ~/.claude/skills/<skill>/scripts/retire-session-handoff.ps1 -ProjectDir "<project>" -Check
+```
+
+It changes nothing. If it exits non-zero, relay its message, skip both the migration and the retirement, and say so in the step 6 report. Its one designed refusal is a file whose staged changes differ from both HEAD and the disk; any other error (the script not found, a failed `git` call) is not that refusal: report it as an error, not as staged changes. Checking first matters because the migration rotates `.prev`: a refusal after it would leave the files in place, and the re-run would rotate `.prev` again and push the developer's live handoff out.
+
+Then you migrate one block: the most recent one. It is usually the top block, but check the dates in the headings. When both files exist, take the more recent of the two; with no dates, go by the file's last commit or, for an untracked file, its modification time. Write it to the handoff path in a single write, in that rule's format: the current state plus references to commits, issues and files, not a transcript. Move whatever already sits at that path to its `.prev` first, once: the rule keeps a single previous generation, so a second write would push the developer's live handoff out. If the block describes closed work, or is old enough that the code has moved past it, say so in one line and create nothing.
+
+The path comes from the `### Handoff` section of the project's `CLAUDE.md`. If the project has none (step 4 left its `CLAUDE.md` customized), compute the path with the rule in `<canonical scaffold>/CLAUDE.md`, which depends only on the OS temp dir and the git toplevel, and carry the gap to the step 6 report.
+
+Then invoke the script from the project's bootstrap skill (the `skill` step 1 resolved). It lives there and nowhere else:
+
+```powershell
+pwsh -File ~/.claude/skills/<skill>/scripts/retire-session-handoff.ps1 -ProjectDir "<project>"
+```
+
+It takes tracked files out with `git rm`, which stages the removal and does not commit it. Untracked and ignored ones go to `.bootstrap-backup/`, numbered `.2` when a backup is already there. It prints `{ removed[], backedUp[{file, backup}] }`. A tracked file with uncommitted edits appears in both lists: its edits are backed up before the `git rm`. Use the `backup` field as reported; do not derive it from `file`. The `-Check` above already ruled out its one refusal. If it exits non-zero anyway, relay its message, and do not assume it retired nothing: a failed `git` call on the second file stops it after the first one was already removed or backed up, so check `git status` and `.bootstrap-backup/` and say in the step 6 report what actually moved.
+
+### 5. Re-seal the manifest
+
+After applying, record the new baseline so the next run is precise:
+
+```powershell
+pwsh -File <this-skill>/scripts/reseal-manifest.ps1 -ProjectDir "<project>" -CanonicalScaffold "<canonical scaffold>"
+```
+
+When step 1 returned `variantSwitch: true`, add `-VariantSwitch`. Without it, a file the user chose to keep in step 4 (its content is the other variant's, still matching its base) would be re-sealed as untouched, and the next upgrade, now reading the new variant from `generatedFrom`, would list it as `outdated` and overwrite it under a single approval. With the switch, every file with a base that does not match the canonical is left out of the manifest, so it stays `customized` and is put to the user each time; files the user took from the canonical are sealed as usual.
+
+For a legacy project this seeds `.bootstrap-manifest.json` for the first time — the project is now "adopted" into the versioning system. A project that already had a manifest is never seeded: a file with no base that differs from the canonical one is the project's own, so it stays out of the manifest and keeps showing as customized.
+
+### 5b. Variant extras
+
+The bootstrap skill the canonical scaffold belongs to (the folder holding its `assets/scaffold`) may ship an `upgrade-extras.md` at its root: steps only that variant needs after an upgrade. If the file exists, read it and follow it now; its own completion criterion says what the step 6 report must carry. If it does not exist, there are no extras.
+
+### 6. Report what changed
+
+List files copied, updated, left customized (skipped), orphans flagged, the handoff files removed and backed up by step 4b (with each `backup` path) or, if its `-Check` refused or the script failed, the script's message and, after a failure, what actually moved; and, when the project's `CLAUDE.md` has no `### Handoff` section, that it should merge it: a next session only finds the migrated handoff through that rule, and whatever step 5b's extras asked the report to carry. Remind the user to review the diff and commit when satisfied. Do not commit on their behalf unless they ask.
+
+## Guardrails
+
+- Never overwrite a `customized` file without explicit per-file consent — that's the whole point.
+- Don't delete orphans automatically.
+- The scaffold's `.gitignore` lives as `gitignore.txt` in the source; map it when copying.
+- If `resolve-canonical.ps1` or `compare-scaffold.ps1` errors (several candidate skills, canonical scaffold with no manifest), stop and ask or report — don't guess.
+- `.mcp.json` is not part of the scaffold nor the manifest, so `compare-scaffold.ps1` does not see it and this upgrade never touches it. If the project was bootstrapped before the per-project MCP feature and you want to add a `.mcp.json`, run the menu manually with `~/.claude/skills/<skill>/scripts/gen-mcp-json.ps1` (not part of the upgrade flow).
